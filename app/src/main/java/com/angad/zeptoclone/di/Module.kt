@@ -1,6 +1,8 @@
 package com.angad.zeptoclone.di
 
 import com.angad.zeptoclone.data.api.FakeStoreApiService
+import com.angad.zeptoclone.data.repository.CategoryRepository
+import com.angad.zeptoclone.data.repository.CategoryRepositoryImpl
 import com.angad.zeptoclone.data.repository.ProductRepository
 import com.angad.zeptoclone.data.repository.ProductRepositoryImpl
 import dagger.Binds
@@ -20,6 +22,12 @@ abstract class RepositoryBindingModule {
     abstract fun bindProductRepository(
         productRepositoryImpl: ProductRepositoryImpl
     ): ProductRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindCategoryRepository(
+        categoryRepositoryImpl: CategoryRepositoryImpl
+    ): CategoryRepository
 
 }
 
