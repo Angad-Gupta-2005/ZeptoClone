@@ -1,5 +1,6 @@
 package com.angad.zeptoclone.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.angad.zeptoclone.data.models.fakeApi.CartItem
@@ -10,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import javax.inject.Inject
@@ -212,6 +214,29 @@ class CartViewModel @Inject constructor(
     //    Payment section
     fun generateOrderId(): String {
         return "Order_" + System.currentTimeMillis()
+    }
+
+//    This function help to show product image with product details when the order placed
+    suspend fun getCartItemsWithImageUrls(): Pair<List<String>, Map<String, String>>{
+        Log.d("TAG", "Getting CartItems With Image Urls: ")
+        val cartItems = cartRepository.getCartItems().first()
+
+    //    Create formatted item strings
+        val itemDetails = cartItems.map { cartItem ->
+            "${cartItem.product.name} (₹${cartItem.product.price} x ${cartItem.quantity} = ₹${cartItem.product.price * cartItem.quantity})"
+        }
+
+    //    Create a map of item ID to image URL
+        val imageUrls = cartItems.associate { cartItem ->
+            cartItem.product.id.toString() to (cartItem.product.imageUrl ?: "")
+        }.filter { it.value.isNotEmpty() }  //  Only include non-empty URLs
+
+        Log.d("TAG", "Found ${itemDetails.size} items with image URLs: ${itemDetails.size}")
+        imageUrls.forEach { (itemId, imageUrl) ->
+            Log.d("TAG", "Item ID: $itemId, Image URL: $imageUrl")
+        }
+
+        return Pair(itemDetails, imageUrls)
     }
 
 }

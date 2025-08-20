@@ -1,5 +1,11 @@
 package com.angad.zeptoclone.ui.screens
 
+import android.app.Activity
+import android.content.Intent
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,12 +57,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.lifecycleScope
 import com.angad.zeptoclone.R
+import com.angad.zeptoclone.ui.payment.PaymentActivity
+import com.angad.zeptoclone.ui.screens.components.BillSummaryBottomSheet
 import com.angad.zeptoclone.ui.screens.components.DeliveryPartnerTipSection
 import com.angad.zeptoclone.ui.screens.components.EnhancedCartItemRow
 import com.angad.zeptoclone.ui.viewmodel.AuthViewModel
 import com.angad.zeptoclone.ui.viewmodel.CartViewModel
 import com.angad.zeptoclone.ui.viewmodel.LocationViewModel
+import kotlinx.coroutines.launch
+import java.util.ArrayList
 import kotlin.math.roundToInt
 
 @Composable
@@ -65,7 +77,7 @@ fun CartScreen(
     onNavigateBack: () -> Unit,
     cartViewModel: CartViewModel,
     viewModel: LocationViewModel,
-    authViewModel: AuthViewModel
+    authViewModel: AuthViewModel = hiltViewModel()
 ) {
 
     var selectedTip by remember { mutableStateOf(-1) }
@@ -93,9 +105,101 @@ fun CartScreen(
 
     val bottomComponentsHeight = 56.dp + 48.dp + 72.dp
 
-//    val currentUser = authViewModel.getCurrentUser()
-//    val phone = authViewModel.phoneNumber
+    val currentUser = authViewModel.getCurrentUser()
+    val phone = authViewModel.phoneNumber.collectAsState().value ?: ""
 
+    val paymentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK){
+            val isPaymentSuccessful = result.data?.getBooleanExtra("PAYMENT_SUCCESSFUL", false) ?: false
+
+            if (isPaymentSuccessful){
+            //    Clear the cart
+                cartViewModel.clearCart()
+                Toast.makeText(context, "Payment Successful! Your order has been placed", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Payment was not completed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+
+//    Function to start Razorpay payment
+    fun launchedPaymentActivity(){
+        val orderId = cartViewModel.generateOrderId()
+        val email = currentUser?.email?: ""
+
+    //    Access lifecycleScope from the context(activity or fragment)
+    //    This requires that your context is a LifeCycleOwner
+    (context as? androidx.lifecycle.LifecycleOwner)?.lifecycleScope?.launch {
+        try {
+        //    Get cart items and their image urls
+            val (itemDetails, itemUrls) = cartViewModel.getCartItemsWithImageUrls()
+
+            Log.d("Cart Screen", "Launching payment with ${itemDetails.size} items and ${itemUrls.size} image urls ")
+
+        //    Debug logging 
+            itemUrls.forEach { (id, url) ->
+                Log.d("Cart Screen", "Item $id has image Url $url")
+            }
+
+            val intent = Intent(context, PaymentActivity::class.java).apply {
+                putExtra("TOTAL_AMOUNT", finalTotal)
+                putExtra("ORDER_ID", orderId)
+                putExtra("USER_EMAIL", email)
+                putExtra("USER_PHONE", phone)
+                putExtra("TIP_AMOUNT", tipAmount)
+                putExtra("DELIVERY_ADDRESS", address)
+
+            //    Add cart item as String ArrayList
+                putStringArrayListExtra("CART_ITEMS_DATA", ArrayList(itemDetails))
+
+            //    Add image urls as HashMap (must be Serializable)
+                putExtra("CART_ITEM_IMAGES", HashMap<String, String>(itemUrls))
+            }
+
+            paymentLauncher.launch(intent)
+        } catch (e: Exception){
+            Log.e("Cart Screen", "Error launching payment", e)
+            Toast.makeText(context, "Error preparing payment", Toast.LENGTH_SHORT).show()
+        }
+    }?: run {
+        //    Alternate approaches if lifecycleScope is not available 
+        Log.w("Cart Screen", "launchedPaymentActivity: LifeCycleOwner is not available" )
+
+    //    Start a simple intent without coroutine features
+        val intent = Intent(context, PaymentActivity::class.java).apply {
+            putExtra("TOTAL_AMOUNT", finalTotal)
+            putExtra("ORDER_ID", orderId)
+            putExtra("USER_EMAIL", email)
+            putExtra("USER_PHONE", phone)
+            putExtra("TIP_AMOUNT", tipAmount)
+            putExtra("DELIVERY_ADDRESS", address)
+
+        //    Add cart items without image URLS in this fallback path
+            val simpleItemDetails = cartItems.map { cartItem ->
+                "${cartItem.product.name} (₹${cartItem.product.price} x ${cartItem.quantity} = ₹${cartItem.product.price * cartItem.quantity})"
+            }
+            putStringArrayListExtra("CART_ITEMS_DATA", ArrayList(simpleItemDetails))
+        }
+        paymentLauncher.launch(intent)
+
+    }
+    }
+
+    BillSummaryBottomSheet(
+        isVisible = isBottomSheetVisible,
+        onDismiss = { cartViewModel.hideBottomSheet() },
+        totalPrice = totalPrice,
+        itemCount = totalItems,
+        tipAmount = tipAmount,
+        onApplyFreeDelivery = { cartViewModel.applyFreeDelivery() },
+        isFreeDeliveryApplied = isFreeDeliveryApplied,
+        isApplyingFreeDelivery = isApplyingFreeDelivery,
+        finalTotal = finalTotal,
+        onPayClicked = { launchedPaymentActivity() },
+    )
 
 //    UI of cart screen
     Box(
@@ -131,7 +235,7 @@ fun CartScreen(
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
-                                .clickable( onClick = onNavigateBack)
+                                .clickable(onClick = onNavigateBack)
                                 .padding(8.dp),
                             contentAlignment = Alignment.Center
                         ){
@@ -639,7 +743,60 @@ fun CartScreen(
                     }
                 }
 
-            //    Payment section start here  6:37:05 time
+            //    Payment section start here  6:55:05 time
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                        .clickable { cartViewModel.showBottomSheet() },
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.instructions),
+                                contentDescription = "To Pay",
+                                modifier = Modifier.size(24.dp)
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column {
+                                Text(
+                                    text = "To Pay",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+
+                                Text(
+                                    text = "Incl. all taxes and charges",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                    //    Right side price display
+                        Column(
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                            //    Original price with markup - replace with calculated original price
+                            }
+                        }
+                    }
+                }
             }
         }
     }
